@@ -92,7 +92,7 @@ def scan_for_images(file_data):
     return sorted_hashes, image_freq, image_bytes_map
 
 def process_pdf(file_bytes, hashes_to_remove):
-    """Replaces selected images at the object level with an invisible pixel."""
+    """Replaces selected images at the object level with a true transparent pixel."""
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     modifications_made = False
 
@@ -114,22 +114,26 @@ def process_pdf(file_bytes, hashes_to_remove):
                 except Exception:
                     continue
         
-        # 2. Neutralize the images at the source
+        # 2. Neutralize the images at the source with true transparency
         if xrefs_to_blank:
             for xref in xrefs_to_blank:
-                # Convert the image dictionary to a 1x1 invisible ImageMask
-                doc.xref_set_key(xref, "ImageMask", "true")
+                # Strip out previous mask and compression settings
+                doc.xref_set_key(xref, "ImageMask", "null")
+                doc.xref_set_key(xref, "Decode", "null")
+                doc.xref_set_key(xref, "SMask", "null")
                 doc.xref_set_key(xref, "Filter", "null")
+                
+                # Convert to a standard 1x1 grayscale image
                 doc.xref_set_key(xref, "Width", "1")
                 doc.xref_set_key(xref, "Height", "1")
-                doc.xref_set_key(xref, "BitsPerComponent", "1")
-                doc.xref_set_key(xref, "ColorSpace", "null")
-                doc.xref_set_key(xref, "SMask", "null")
-                doc.xref_set_key(xref, "Mask", "null")
-                doc.xref_set_key(xref, "Decode", "null")
+                doc.xref_set_key(xref, "BitsPerComponent", "8")
+                doc.xref_set_key(xref, "ColorSpace", "/DeviceGray")
                 
-                # Overwrite the actual stream with a transparent byte
-                doc.update_stream(xref, b"\x00")
+                # Apply a Color Mask [min max] to make the white pixel transparent
+                doc.xref_set_key(xref, "Mask", "[255 255]")
+                
+                # Overwrite stream with a single white pixel (b"\xff" is 255 in DeviceGray)
+                doc.update_stream(xref, b"\xff")
                 modifications_made = True
 
     if modifications_made:
