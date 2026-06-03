@@ -7,6 +7,10 @@ import zipfile
 import hashlib
 import re
 import streamlit.components.v1 as components
+from PIL import ImageFile
+
+# Prevent Pillow from crashing on incomplete/truncated PDF images
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # --- CRITICAL FIX ---
 fitz.TOOLS.mupdf_display_errors(False)
@@ -159,7 +163,12 @@ if uploaded_files:
         
         for idx, h in enumerate(sorted_hashes):
             with cols[idx % 3]:
-                st.image(image_bytes_map[h], use_container_width=True)
+                try:
+                    # using width='stretch' as use_container_width is deprecating
+                    st.image(image_bytes_map[h], width="stretch")
+                except Exception:
+                    st.warning("⚠️ Preview unavailable (corrupted data)")
+                    
                 st.caption(f"Occurrences: {image_freq[h]}")
                 if st.checkbox("Remove", key=f"chk_{h}"):
                     selected_hashes.add(h)
