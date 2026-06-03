@@ -92,54 +92,55 @@ def scan_for_images(file_data):
     return sorted_hashes, image_freq, image_bytes_map
 
 def process_pdf(file_bytes, hashes_to_remove):
-    """Removes selected images from the PDF stream and cleans metadata."""
+    """Replaces selected images at the object level with an invisible pixel."""
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     modifications_made = False
 
     if doc.page_count > 0:
+        xrefs_to_blank = set()
+        
+        # 1. Identify the internal xref IDs of the images we want to remove
         for page in doc:
-            page.clean_contents()
-            images = page.get_images(full=True)
-            names_to_remove = []
-            
-            for img in images:
+            for img in page.get_images(full=True):
+                xref = img[0]
+                if xref in xrefs_to_blank:
+                    continue
                 try:
-                    base_image = doc.extract_image(img[0])
+                    base_image = doc.extract_image(xref)
                     if base_image:
                         img_hash = get_image_hash(base_image["image"])
                         if img_hash in hashes_to_remove:
-                            names_to_remove.append(img[7])
+                            xrefs_to_blank.add(xref)
                 except Exception:
                     continue
-            
-            if names_to_remove:
-                xrefs = page.get_contents()
-                for xref in xrefs:
-                    stream = doc.xref_stream(xref)
-                    if stream:
-                        stream_modified = False
-                        for name in names_to_remove:
-                            # Search the stream for the PDF drawing operator (/Name Do) and strip it
-                            pattern = rb'/%s\s+Do\b' % re.escape(name.encode('ascii'))
-                            new_stream, count = re.subn(pattern, b'', stream)
-                            if count > 0:
-                                stream = new_stream
-                                stream_modified = True
-                                modifications_made = True
-                        
-                        if stream_modified:
-                            doc.update_stream(xref, stream)
-    
+        
+        # 2. Neutralize the images at the source
+        if xrefs_to_blank:
+            for xref in xrefs_to_blank:
+                # Convert the image dictionary to a 1x1 invisible ImageMask
+                doc.xref_set_key(xref, "ImageMask", "true")
+                doc.xref_set_key(xref, "Filter", "null")
+                doc.xref_set_key(xref, "Width", "1")
+                doc.xref_set_key(xref, "Height", "1")
+                doc.xref_set_key(xref, "BitsPerComponent", "1")
+                doc.xref_set_key(xref, "ColorSpace", "null")
+                doc.xref_set_key(xref, "SMask", "null")
+                doc.xref_set_key(xref, "Mask", "null")
+                doc.xref_set_key(xref, "Decode", "null")
+                
+                # Overwrite the actual stream with a transparent byte
+                doc.update_stream(xref, b"\x00")
+                modifications_made = True
+
     if modifications_made:
         out_buffer = io.BytesIO()
-        # garbage=4 destroys objects that are no longer referenced by the cleaned stream
+        # garbage=4 will optimize the PDF and remove the old image data entirely
         doc.save(out_buffer, garbage=4, deflate=True)
         doc.close()
         return out_buffer.getvalue()
     else:
         doc.close()
         return file_bytes
-
 # --- Main App Execution ---
 uploaded_files = st.file_uploader(
     "Choose PDF or ZIP files", type=["pdf", "zip"], accept_multiple_files=True
