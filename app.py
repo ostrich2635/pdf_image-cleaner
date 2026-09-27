@@ -218,7 +218,7 @@ if uploaded_files:
                                 st.download_button(
                                     label=f"📥 Download Cleaned {item['name']}",
                                     data=processed,
-                                    file_name=f"cleaned_{item['name']}",
+                                    file_name=f"{item['name']}",
                                     mime="application/pdf",
                                     key=f"dl_{item['name']}"
                                 )
